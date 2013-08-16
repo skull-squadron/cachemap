@@ -8,7 +8,10 @@ import (
     "time"
 )
 
+// must be hashable
 type Key   interface{}
+
+
 type Value interface{}
 
 /* NOTE: to use CacheMap, another object must implement cachemap.Persistent */
@@ -29,12 +32,13 @@ type Persistent interface {
     // delete key somewhere else
     Delete (key Key) error
 
-    // How many bytes are stored
+    // How many total bytes of all keys and values are persisted
     GetBytes() (uint64, error)
 }
 
 // dont create this struct or modify these fields yourself
 type Item struct {
+    // The actual Value data
     Value
 
     // when this item was originally Add()ed
@@ -55,13 +59,18 @@ type CacheMap struct {
     persistent               Persistent
     persistentMutex          sync.Mutex
     mutex                    sync.Mutex
+    // set this to true to allow concurrent access
     PersistentIsThreadSafe   bool
+    // how long to wait for operations to complete, NoTimeout = infinite
     PersistTimeout           time.Duration
+    // maximum number of times to allow in-memory
     MaxItems                 int
     _bytes                   uint64
+    // maximum number of bytes to allow in-memory
     MaxBytes                 uint64
     evictorRunning           bool
     lazyEvictor              bool
+    // delay between runs of the background evictor
     EvictorDelay             time.Duration
 }
 
@@ -70,6 +79,7 @@ const NoTimeout = 0 * time.Second
 const DefaultEvictorDelay = 3 * time.Second
 const DefaultMaxBytes = 128*1024*1024
 
+// create a new, non-lazy map
 func NewCacheMap(c Persistent) CacheMap {
     return CacheMap {
         cache: make(map[Key]*Item),
@@ -81,6 +91,7 @@ func NewCacheMap(c Persistent) CacheMap {
     }
 }
 
+// create a new, **lazy** map
 func NewLazyCacheMap(c Persistent) CacheMap {
     return CacheMap {
         cache: make(map[Key]*Item),
@@ -248,6 +259,8 @@ func (m *CacheMap) createItem(key Key, _new *Item) (err error) {
 }
 
 // add key, value to the map
+// keyBytes should be the length of key in *persisted* bytes
+// valueBytes should be the length of value in *persisted* bytes
 func (m *CacheMap) Add(key, value Key, KeyBytes, ValueBytes uint64) error {
     now := time.Now()
     item := &Item{
